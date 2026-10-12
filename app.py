@@ -45,12 +45,88 @@ def label(record):
 st.title("💼 Job Application Tracker")
 st.caption("Keep your job search organized — applications, interviews, and offers in one place.")
 db = client()
+from urllib.parse import urlparse, parse_qs
 
+reset_requested = st.query_params.get("password_reset") == "1"
+
+if reset_requested and "user_id" not in st.session_state:
+    st.subheader("🔑 Reset your password")
+
+    st.info(
+        "Click the reset link in your email. "
+        "Then copy the full URL from your browser's address bar "
+        "and paste it below."
+    )
+
+    with st.form("complete_password_reset"):
+        recovery_link = st.text_input(
+            "URL after opening the reset email link",
+            type="password"
+        )
+        new_password = st.text_input(
+            "New password",
+            type="password"
+        )
+        confirm_password = st.text_input(
+            "Confirm new password",
+            type="password"
+        )
+
+        reset_submit = st.form_submit_button("Change password")
+
+    if reset_submit:
+        if len(new_password) < 8:
+            st.error("Password must contain at least 8 characters.")
+
+        elif new_password != confirm_password:
+            st.error("Passwords do not match.")
+
+        else:
+            try:
+                parsed = urlparse(recovery_link.strip())
+
+                if (
+                    parsed.scheme != "https"
+                    or parsed.hostname
+                    != "jobapplicationtracker-3a5s3zrgh8vznikc2hbzi7.streamlit.app"
+                ):
+                    raise ValueError("Invalid reset URL.")
+
+                tokens = parse_qs(parsed.fragment)
+
+                if tokens.get("type", [""])[0] != "recovery":
+                    raise ValueError("Not a recovery link.")
+
+                access_token = tokens["access_token"][0]
+                refresh_token = tokens["refresh_token"][0]
+
+                db.auth.set_session(access_token, refresh_token)
+
+                db.auth.update_user({
+                    "password": new_password
+                })
+
+                db.auth.sign_out()
+
+                st.success(
+                    "Password changed successfully! "
+                    "You can now sign in."
+                )
+
+            except Exception:
+                st.error(
+                    "Password reset failed. "
+                    "Request a new reset link and try again."
+                )
+
+    st.stop()
 # A client is kept only in this Streamlit browser session. Supabase enforces
 # per-user access with row-level security policies (see schema.sql).
 if "user_id" not in st.session_state:
     st.subheader("Sign in to your private tracker")
-    sign_in, sign_up = st.tabs(["Sign in", "Create account"])
+    sign_in, sign_up, forgot = st.tabs(
+        ["Sign in", "Create account", "Forgot Password?"]
+    )
     with sign_in:
         with st.form("sign_in"):
             email = st.text_input("Email", key="login_email")
@@ -83,7 +159,29 @@ if "user_id" not in st.session_state:
                     st.success("Account request received. If email confirmation is enabled, check your inbox, then sign in.")
                 except Exception as exc:
                     st.error(f"Could not create account: {exc}")
-    st.stop()
+    with forgot:
+        st.subheader("Reset your password")
+    
+        with st.form("forgot_password"):
+            reset_email = st.text_input("Registered email")
+            send_reset = st.form_submit_button("Send reset link")
+
+        if send_reset:
+            if not reset_email.strip():
+                st.error("Please enter your email address.")
+            else:
+                try:
+                    db.auth.reset_password_email(
+                        reset_email.strip(),
+                        options={
+                            "redirect_to": "https://jobapplicationtracker-3a5s3zrgh8vznikc2hbzi7.streamlit.app/?password_reset=1"
+                        }
+                    )
+                    st.success("If an account exists, a password reset link will be sent.")
+                except Exception as exc:
+                    st.error(f"Unable to send reset email: {exc}")
+
+    st.stop()            
 
 with st.sidebar:
     st.write("🔐 Your private workspace")
